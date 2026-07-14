@@ -388,12 +388,48 @@ function toggleLabels(el){
 // ── Parse de datas dd/mm/yyyy vindas do Python ──
 function parseBR(d){ const [dd,mm,yy] = d.split('/'); return new Date(+yy,+mm-1,+dd); }
 
+function periodBounds(){
+  if(currentPeriod==='all') return null;
+  const n = parseInt(currentPeriod,10);
+  const end = new Date(); end.setHours(0,0,0,0);
+  const start = new Date(end); start.setDate(start.getDate()-(n-1));
+  return {start, end};
+}
+function fmtBR(d){ return String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear(); }
+
 function rawForPeriod(){
   if(currentPeriod==='all') return RAW;
-  const n = parseInt(currentPeriod,10);
-  const maxDate = RAW.reduce((m,r)=>{ const t=parseBR(r.d); return t>m?t:m; }, new Date(0));
-  const minKeep = new Date(maxDate); minKeep.setDate(minKeep.getDate()-(n-1));
-  return RAW.filter(r=>parseBR(r.d)>=minKeep);
+  const {start, end} = periodBounds();
+  return RAW.filter(r=>{ const t = parseBR(r.d); return t>=start && t<=end; });
+}
+
+// Monta a série diária do gráfico preenchendo com zero os dias sem nenhum
+// registro na planilha (ex: dia sem investimento) — sem isso, esses dias
+// simplesmente sumiam da contagem e o filtro de período ficava errado.
+function buildCalendarSeries(){
+  let start, end;
+  if(currentPeriod==='all'){
+    if(!DAILY.days.length) return {labels:[],reach:[],engajamento:[],conversoes:[],spend:[],cpm:[],cpe:[],cpl:[]};
+    start = parseBR(DAILY.days[0]);
+    end = new Date(); end.setHours(0,0,0,0);
+  } else {
+    ({start, end} = periodBounds());
+  }
+  const idx = {}; DAILY.days.forEach((d,i)=>{ idx[d]=i; });
+  const labels=[], reach=[], engajamento=[], conversoes=[], spend=[], cpm=[], cpe=[], cpl=[];
+  for(let d=new Date(start); d<=end; d.setDate(d.getDate()+1)){
+    const key = fmtBR(d);
+    labels.push(key);
+    const i = idx[key];
+    reach.push(i!=null ? DAILY.reach[i] : 0);
+    engajamento.push(i!=null ? DAILY.engajamento[i] : 0);
+    conversoes.push(i!=null ? DAILY.conversoes[i] : 0);
+    spend.push(i!=null ? DAILY.spend[i] : 0);
+    cpm.push(i!=null ? DAILY.cpm[i] : null);
+    cpe.push(i!=null ? DAILY.cpe[i] : null);
+    cpl.push(i!=null ? DAILY.cpl[i] : null);
+  }
+  return {labels, reach, engajamento, conversoes, spend, cpm, cpe, cpl};
 }
 
 function renderKPIs(){
@@ -499,16 +535,15 @@ function hexToRgba(hex, alpha){
 function isDark(){ return document.documentElement.getAttribute('data-theme')==='dark'; }
 
 function renderChart(){
-  const n = currentPeriod==='all' ? DAILY.days.length : parseInt(currentPeriod,10);
-  const start = Math.max(0, DAILY.days.length - n);
-  const labels = DAILY.days.slice(start);
+  const s = buildCalendarSeries();
+  const labels = s.labels;
   const modeMap = {
-    alcance:     {barData:DAILY.reach.slice(start),       barLbl:'Alcance',     costData:DAILY.cpm.slice(start), costLbl:'CPM'},
-    engajamento: {barData:DAILY.engajamento.slice(start), barLbl:'Engajamento', costData:DAILY.cpe.slice(start), costLbl:'CPE'},
-    conversao:   {barData:DAILY.conversoes.slice(start),  barLbl:'Conversões',  costData:DAILY.cpl.slice(start), costLbl:'CPL'},
+    alcance:     {barData:s.reach,       barLbl:'Alcance',     costData:s.cpm, costLbl:'CPM'},
+    engajamento: {barData:s.engajamento, barLbl:'Engajamento', costData:s.cpe, costLbl:'CPE'},
+    conversao:   {barData:s.conversoes,  barLbl:'Conversões',  costData:s.cpl, costLbl:'CPL'},
   };
   const {barData, barLbl, costData, costLbl} = modeMap[currentView];
-  const spendData = DAILY.spend.slice(start);
+  const spendData = s.spend;
 
   document.getElementById('chartTitle').textContent = barLbl+' & Investimento por dia';
   document.getElementById('chartSub').textContent = barLbl+' (barras) · Investimento (linha verde) · '+costLbl+' (linha tracejada)';
